@@ -1,0 +1,168 @@
+---
+title: "BioImplants"
+author: "WingKi Yu"
+date: "Apr 6, 2023"
+output: 
+  html_document:
+    toc: true
+---
+```{r message = FALSE}
+# Library
+library(tidyverse)
+library(dplyr)
+library(janitor) #clean_names()
+
+bi <- read_csv("bioimplants.csv")
+```
+
+```{r}
+glimpse(bi)
+
+# Cleaning
+bi <- bi %>%
+  clean_names() %>%
+  na.omit %>%
+  mutate(attrition = factor(attrition, levels = c("Yes", "No"))) %>%
+  select(-employee_number)
+
+
+summary(bi)
+```
+
+
+## Q1
+What is the attrition rate for employees at BI? (A rate, remember, is expressed as a proportion.)
+
+Calculate overall attrition rate.
+
+Create a summary table of conditional attrition rates by department and job role. (The table should have 3 columns: department, job role, and the calculated conditional attrition rate.) Sort this table by attrition rate in descending order.
+
+Note: The simplest possible classification model would be to use the attrition majority class—“Yes” or “No”—as the prediction. This is called “majority class” prediction. The in-sample accuracy of the majority class model is simply the proportion of the majority class. This is an important performance benchmark.
+
+```{r}
+# Overall Attrition Rate
+bi %>%
+   dplyr::summarize(attrition= mean(attrition=="Yes")) 
+
+# By Department & Job Role
+bi %>% 
+  group_by(department, job_role) %>% 
+  dplyr::summarize(attrition = mean(attrition=="Yes")) %>% 
+  arrange(desc(attrition))
+
+```
+
+> The attrition rate for employees at BI is 0.161 * 100% = 16.1%.
+
+## Q2
+Fit a logistic regression model of attrition using all the predictors. (Note: employee_number is NOT a predictor!)
+
+Report accuracy for this model with a decision threshold of .5. (Accuracy is defined as the proportion of correct predictions.)
+
+Comment on whether the model offers an improvement over predicting with the majority class.
+```{r}
+# Logistic Regression Model
+logistic_mod <- glm(ifelse(attrition=="Yes", 1, 0) ~., # Change attrition to 0/1 on the fly
+                    data = bi, 
+                    family = binomial)
+options(scipen = 999)
+
+summary(logistic_mod)
+
+# Accuracy
+predict(logistic_mod, type = "response") # fitted values
+
+ifelse(predict(logistic_mod, type = "response") > .5, "Yes", "No") # assign label
+
+ifelse(predict(logistic_mod, type = "response") > .5, "Yes", "No") == bi$attrition # observed labels
+
+(ifelse(predict(logistic_mod, type = "response") > .5, "Yes", "No") == bi$attrition) %>% 
+  mean # 0.89
+
+bi %>% 
+  summarize(attrition = mean(attrition=="No")) # 0.839
+
+```
+
+> Majority class is "No". The baseline rate of the majority class was .839, and hence, the logistic regression model at accuracy of .89 is doing slightly better than the majority class prediction.
+
+## Q3
+The upside of standardizing inputs by centering and scaling is that it allows you to compare coefficient effect sizes easily—they are all on the same scale. (The downside is that they are no longer scaled in the original units, and interpretation changes.) Even though the coefficients are expressed in log odds in this case, after standardization they can still be compared for effect sizes on a relative basis.
+
+There are a lot of coefficients to type into the model formula. A shortcut to automatically include all the predictors in the dataset is ., as in: glm(target ~ ., family = binomial, data = ...). However, this shortcut doesn’t allow you to standardize also. The easiest solution to create a new dataset in which all the continuous variables are centered. For this a version of mutate() is useful: mutate_if(). The code would go like this:
+
+data %>%    mutate_if(is.numeric, scale)
+
+In English: if the variable is numeric, then scale it.
+
+Notice that some of the standard errors and coefficients in the model above have exploded. (You can see this more easily if you adjust the number of digits printed in the output with options(scipen = 3).) The SEs for some of the department and job_role coefficients are over 380. Why has this happened? Multicolinearity! Some of the levels of the department variable are correlated with levels in job_role. For example, since most of the people in the Human Resources department also have a job title of Human Resources, the information from department is redundant: by definition, if we know job_role we also know department and vice versa. This is a textbook example of how multicollinearity makes inference difficult—we can’t compare the coefficients because some of them are wacky. The solution? Remove the redundant variable. Refit the model without department
+
+Which of the centered and scaled predictors has the largest effect size?
+
+Interpret the coefficient with the largest effect size. Since you are working with standardized coefficients, the interpretation for continuous predictors will be: a 1 unit (that is, after scaling, a 1 standard deviation) increase in x is associated with a coefficient-sized change in the log odds of y, on average, while holding the other predictors constant. The coefficient represents the change in the log odds of the outcome associated with an increase from the reference level in the categorical variable.
+```{r}
+# Standardization
+bi_scaled <- bi %>%
+  mutate_if(is.numeric, function(x) scale(x) %>% as.vector())
+  
+glimpse(bi_scaled)
+
+# Fitting Model
+(scaled_mod <- glm(ifelse(attrition=="Yes", 1, 0) ~., 
+                    data = bi_scaled, 
+                    family = binomial)) %>% 
+  summary
+
+options(scipen = 3)
+
+# Remove Redundant Variable
+bi_scaled <- bi_scaled %>%
+    select(-department)
+
+# Refitting
+(scaled_mod <- glm(ifelse(attrition=="Yes", 1, 0) ~., 
+                    data = bi_scaled, 
+                    family = binomial)) %>% 
+  summary
+
+options(scipen = 3)
+
+```
+> Among all the centered and scaled predictors, 'over_time' has the largest effect size. An increase of one unit in centered and scaled 'over_time' (i.e. one standard deviation) is associated with a change of 1.97 in the log odds of attrition rate.
+
+## Q4
+Based on the above logistic regression model (and, specifically, on the coefficient with the largest effect size that you identified above), how might company policy be changed to reduce employee attrition?
+
+Describe your proposed policy change.
+
+Estimate and explain the change in churn probability associated with that policy change.
+```{r}
+# Churn Probability
+predict(logistic_mod, 
+        type = "response") %>% 
+  mean # .161
+
+# Churn Probability with Policy Change
+predict(logistic_mod, 
+        newdata = mutate(bi, over_time = "No",
+                         business_travel = "Travel_Rarely"),
+        type = "response") %>% 
+  mean # .095
+
+# Change in Churn Probability
+.161 - .095
+
+
+```
+
+> Based on the above logistic regression model, BI can reduce employee's overtime and business trip frequency. With such policy change, the churn probability can reduce from .161 to .095 with a difference of .066.
+
+## Q5
+What should Angelica say in her report? Please include quantitative details from your answers to the questions above.
+```{r}
+# Cost to Rehire a Position Saved
+60000 * 1000 * .21 * .066 # 831600
+
+```
+
+> Angelica should recommend a policy change of reducing the amount of overtime as well as business trip frequency in order to prevent employee turnover. Currently, the company-side attrition rate is at 16.1%. Attrition varies by department and position. Employee turnover is a more severe problem in the Sales Department than Research and Development Department and Human Resources Deparment with the churn rates differ by approximately 15%. Besides, generally speaking, attrition rate is much lower on the management level, compared to the other employees. Within the Sales Deparment, sales representative has an attrition rate of 39.8%, whereas, the manager has an attrition rate of 5.4%, giving a difference of 34.4%. Using a logistic regression model, we are able to find out that the amount of overtime is the strongest predictors of attrition, following by the frequent business trips. With the policy change, the churn probability can be reduced by 6.6%. In other words, out of 100 employees we would expect roughly 6 fewer employees to resign under the new policy. In terms of the cost saveing from rehiring a replacement, Bioimplants is able to save $831,600 per year by changing the policy to keep 1000 employees whose annual salary is at $60000.

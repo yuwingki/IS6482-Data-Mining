@@ -1,0 +1,146 @@
+---
+title: "PacDev"
+author: "WingKi Yu"
+date: "3/23/2023"
+output: 
+  html_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(ggplot2)
+
+p <- read_csv("pacdev_data.csv")
+str(p)
+```
+
+
+
+## Q1
+
+Plot price against sqft with a summary linear regression line.
+
+Determine the equation of the summary line in the plot (by fitting the corresponding regression model) and interpret the coefficients for the intercept and sqft in the equation.
+
+In this and subsequent questions interpret means: write down in concrete terms what each coefficient says about the value of a home, or the change in the value of a home, conditional on predictors.
+
+
+```{r}
+ggplot(data = p, mapping = aes(x = sqft, y = price)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +  
+  labs(title = "price ~ sqft")   
+
+lm(price ~ sqft, data = p) %>% 
+  summary()
+
+```
+
+> The equation is y = 269.345x + 40,623.019. $40,623.019 is the average base value of a house in LA at zero sqft. $269.345 is the change in average price of a house per change of sqft.
+
+
+## Q2
+
+Fit a multiple regression model of price with all the available predictors entered additively (+). However, create a centered version of sqft (by subtracting the mean from each observation) and use this as a predictor rather than the original variable. (There should be 8 coefficients in this model.)
+
+Interpret the 4 coefficients for the intercept, centered sqft, and city. Remember that Long Beach is the (missing) reference city in the model, assuming that factor levels have been assigned alphabetically.
+
+```{r}
+
+# centering data, making sqft readable
+c_sqft = p$sqft - mean(p$sqft)
+
+# non-interaction model
+(c_non_int <- lm(price ~ c_sqft + city + pool + garage + bed + bath, data = p)) %>% 
+  summary
+
+
+```
+
+>'intercept': $528,103.213 is the average value of a house in Long Beach area when the other variables equals to 0, that is when the centered sqft is 0 and when there is no pool, garage, bedroom or bathroom. It is an irrealistic situation.
+'c_sqft': $271.561 represents the expected change in the house value in LA area for each standard deviation increase in the centered sq ft, holding other predictors constant. Since sq ft has been centered, a one-unit increase corresponds to an increase of one standard deviation in sq ft.
+'citySanta Monica': $190,239.704 is the average change of house value in Santa Monica area in reference of that in Long Beach area.
+'cityWestwood':$88,020.719 is the average change of house value in Westwood area in reference of the that in Long Beach area.
+
+## Q3
+
+To the above model add an interaction between centered sqft and city. This means that you combine these terms multiplicatively (*) rather than additively (+).
+
+Create a visualization of this interaction model, making sure to use centered sqft in the plot.
+
+Interpret 6 coefficients from this model: the intercept, the main effects for centered sqft and city, and the interaction effects.
+
+Interaction models can be tricky to understand. Here is some guidance:
+
+The intercept is the average value of the target when the inputs are 0 (for numeric variables) or the reference category (for categorical variables).
+
+The main effects are first 7 slope coefficients in the output. You should interpret the first 3. In the plot you created for this question you can see that there is a regression line for each city. Similarly in the interaction model: there is no single relationship between price and sqft, and consequently the main effect for sqft is conditional on city. Specifically, it denotes the relationship between sqft and price for the reference city. The main effects for a predictor in an interaction model will always be conditional on the levels of the variable with which it has been interacted.
+
+The interaction effects are the final 2 coefficients in the output. (The colon indicates the interaction, as in sqft:citySanta Monica.) These coefficients estimate the change in the slope of the regression line for each city compared to the reference city. If the interaction coefficients are positive that means that the regression line relating sqft to price is steeper for that particular city in comparison to the reference city, or, equivalently, that the relationship is stronger.
+
+```{r}
+
+# interaction model
+(int <- lm(price ~ c_sqft * city, data = p)) %>% 
+  summary
+
+# plot
+ggplot(data = p, mapping = aes(x = c_sqft, y = price, color = city)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = FALSE) +  
+  labs(title = "price ~ sqft * city")   
+
+
+```
+> 'intercept': $513,700 is the average value of the house value in Long Beach area when the centered sqft is 0.
+'c_sqft': $238.5 is the change in the house value in Long Beach per each standard deviation change in sqft.
+'citySanta Monica': $189,600 is the average value of the house value in Santa Monica in referece of that in Long Beach when the centered sqft is 0.
+'cityWestwood':$88,280 is the average value of the house value in Westwood in referece of that in Long Beach when the centered sqft is 0.
+'c_sqft:citySanta Monica': $328.6 = ($90.01 + $238.5) is the change in the house value in Santa Monica per each standard deviation change in sqft in referece of that in Long Beach.
+'c_sqft:cityWestwood': $275.72 = ($37.22 + $238.5) is the change in the house value in Westwood per each standard deviation change in sqft in referece of that in Long Beach.
+
+## Q4
+
+Is this a good model? To assess model fit create three plots:
+
+A residual plot with model residuals on the vertical axis and the fitted values on the horizontal axis. Add a summary line.
+
+A plot of the model’s fitted values (again on the horizontal axis) against observed values of price. Add a summary line.
+
+A histogram of the residuals.
+
+Two functions will extract the fitted values from a model object: fitted(object) and predict(object). (If the newdata argument is omitted, predict() just returns the fitted values.)
+
+Comment on model fit.
+
+```{r}
+
+# plots for interaction model
+plot(int, which = 1)
+
+p %>% 
+  mutate(fitted_int = fitted(int),
+         residuals_int = price - fitted_int) %>%
+  ggplot(mapping = aes(x = fitted_int, y = price)) + 
+  geom_point() + 
+  geom_smooth(method = "lm", se = F, col = "red") +
+  labs(title = "price ~ fitted or interation model")
+
+p %>% 
+  mutate(fitted_int = fitted(int),
+         residuals_int = price - fitted_int) %>%
+  ggplot(aes(x = residuals_int)) + 
+  geom_histogram() + 
+  labs(title = "distribution of residuals in interation model")   
+
+```
+> The residual plot shows that all the residuals are randomly scattered around the line of zero with no obvious pattern. Besides, from the second plot where the fitted values are plotted against the price, the red summary line shows that the data is linear and can be described with a line. Also, in the histogram, we can see a normal distribution of residuals (again with a center at 0), further proving that there is no patterns in the residuals. Therefore, the interaction model is a good model.
+
+## Q5
+
+What should Andrew say in his presentation? Write a brief summary of the quantitative evidence that he should use to support this recommendation.
+
+> Andrew should recommend PacDev to focus on Santa Monica among the three cities in LA since it has shown the largest price increases associated with additional square footage according to the interaction model created. The interaction model shows that the increase in price associated with additional square footage in Santa Monica is $328.6, whereas, the increases in price per sqft in Westwood and Long Beach are $275.72 and $238.5 respectively. Santa Monica has the highest increase in house value per sqft, and hence, PacDev should focus on the SFR in Santa Monica.
