@@ -1,0 +1,121 @@
+---
+title: "A6_Yu_WingKi"
+author: "WingKi Yu"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    number_sections: yes
+    toc: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages, prepare and inspect the data
+
+```{r}
+# 1A
+library(C50)
+library(psych)
+library(RWeka)
+library(caret)
+library(rminer)
+library(matrixStats)
+library(knitr)
+library(arules)
+library(tidyverse)
+
+mydir <- getwd()
+setwd(mydir)
+
+wm <- read.csv(file = "Walmart_visits_7trips.csv", stringsAsFactors = FALSE)
+
+str(wm)
+
+wm$TripType <- factor(wm$TripType)
+wm$DOW <- factor(wm$DOW)
+
+summary(wm)
+
+# 1B
+wm %>% select(where(is.numeric)) %>% pairs.panels() # high correlation: totalqty = netqty; uniqueitems ~ totalqty, netqty, uniqdepts; rtnqty ~ rtrndepts; uniqdepts ~ oneitemdepts
+
+# 1C
+model_tree1 <- C5.0(formula = TripType ~., control = C5.0Control(CF=.2), data = wm)
+model_tree1
+
+tree1_prediction <- predict(model_tree1, wm)
+
+mmetric(wm$TripType, tree1_prediction, metric="CONF")
+
+```
+
+# Use SimpleKMeans clustering to understand visits
+```{r}
+# 2A
+TripType.levels <- length(unique(wm))
+wm_train <- wm[,-1]
+
+# 2B
+nClusters <- TripType.levels
+wm_clustering1 <- SimpleKMeans(wm_train, Weka_control(N = nClusters, V=TRUE))
+wm_clustering1
+table(predict(wm_clustering1), wm$TripType)
+
+# 2C
+wm_clustering2 <- SimpleKMeans(wm_train, Weka_control(N = nClusters, init = 1, V=TRUE))
+wm_clustering2
+table(predict(wm_clustering2), wm$TripType)
+
+# 2D
+wm_clustering3 <- SimpleKMeans(wm_train, Weka_control(N = nClusters, A="weka.core.ManhattanDistance", init = 1, V=TRUE))
+wm_clustering3
+table(predict(wm_clustering3), wm$TripType)
+
+# 2E
+wm_clustering4 <- SimpleKMeans(wm_train, Weka_control(N = nClusters, A="weka.core.ManhattanDistance", V=TRUE))
+wm_clustering4
+table(predict(wm_clustering4), wm$TripType)
+
+```
+
+# Market Basket Analysis with the Walmart dept baskets
+```{r}
+# 3A
+Dept_baskets <- read.transactions("Walmart_baskets_1week.csv", format="single", sep = ",", header = TRUE, cols=c("VisitNumber","DepartmentDescription"))
+
+# 3B
+inspect(Dept_baskets[1:15])
+
+# 3C
+itemFrequencyPlot(Dept_baskets, type="relative", topN = 15)
+
+# 3Di
+ords_rules <- apriori(Dept_baskets, parameter = list(support = 0.05, confidence = 0.25, minlen = 2))
+
+ords_rules
+
+summary(ords_rules)
+
+inspect(sort(ords_rules, by = "lift"))
+
+# 3Dii
+ords_rules_2 <- apriori(Dept_baskets, parameter = list(support = 0.04, confidence = 0.2, minlen = 2))
+
+ords_rules_2
+
+summary(ords_rules_2)
+
+inspect(sort(ords_rules_2, by = "lift"))
+
+```
+
+# Reflection
+The K-means clustering model revealed distinct clusters based on customer purchasing behavior. Instead of random initial centroids, adjusting the initial cluster assignment to k-means++ initializes centroids strategically to improve convergence. The model was improved by lowering the within cluster sum of squared errors from 3892.61 to 670.80, while increasing the number of iterations from 20 to 38. 
+
+Whereas, changing the distance function from Euclidean distance to Manhattan distance in the Walmart data set decreased the number of iterations from 20 to 15 (less defined). The sum of within cluster distances also increased from 3892.61 to 5245.51. Since the performance of the clusters was worsen, it probably implies that the data set has a linear shape.
+
+Adjustments to support and confidence thresholds in association rule mining influenced the number and strength of discovered rules. In the model with 0.05 support and 0.25 confidence, I obtained a set of 78 rules. By slightly lowering both support and confidence to 0.04 and 0.2 respectively, I managed to obtain a set of 152 rules without sacrificing the strength of the rule significantly.

@@ -1,0 +1,162 @@
+---
+title: "A3_Yu_WingKi_10/10/2023"
+author: "WingKi Yu"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    number_sections: yes
+    toc: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup}
+# 1A
+library(e1071)
+library(psych)
+library(caret)
+library(rminer)
+library(rmarkdown)
+library(tidyverse)
+library(C50)
+library(matrixStats)
+library(knitr)
+
+cloud_wd <- getwd()
+setwd(cloud_wd)
+
+cd <- read.csv(file = "CD_additional_modified.csv", stringsAsFactors = TRUE)
+
+str(cd)
+
+# 1B
+set.seed(100)
+
+inTrain <- createDataPartition(cd$y, p=.7,list = FALSE)
+
+train_set <-  cd[inTrain,]
+test_set <- cd[-inTrain,]
+
+# 1C
+prop.table(table(train_set$y))
+prop.table(table(test_set$y))
+```
+
+# Simple Decision Tree Training and Testing
+```{r}
+# 2A
+train_model1 <- C5.0(formula = y ~., data = train_set)
+train_model1
+
+train1_prediction <- predict(train_model1, train_set)
+test1_prediction <- predict(train_model1, test_set)
+
+mmetric(train_set$y, train1_prediction, metric="CONF")
+mmetric(test_set$y, test1_prediction, metric="CONF")
+
+mmetric(train_set$y, train1_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(test_set$y, test1_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+
+# 2B
+train_model2 <- C5.0(formula = y ~., control = C5.0Control(CF=.1), data = train_set)
+train_model2
+
+plot(train_model2)
+
+train2_prediction <- predict(train_model2, train_set)
+test2_prediction <- predict(train_model2, test_set)
+
+mmetric(train_set$y, train2_prediction, metric="CONF")
+mmetric(test_set$y, test2_prediction, metric="CONF")
+
+mmetric(train_set$y, train2_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(test_set$y, test2_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+```
+
+# Simple Naïve Bayes Model Training and Testing
+```{r}
+# 3A
+cd_w1_nb <- naiveBayes(y ~ ., data = train_set)
+#cd_w1_nb
+
+predicted_cd_w1 <- predict(cd_w1_nb, train_set)
+mmetric(train_set$y, predicted_cd_w1, metric="CONF")
+mmetric(train_set$y, predicted_cd_w1, metric=c("ACC","TPR","PRECISION","F1"))
+
+# 3B
+cd_w2_nb <- naiveBayes(y ~ . -nr.employed, data = train_set)
+#cd_w2_nb
+
+predicted_cd_w2 <- predict(cd_w2_nb, train_set)
+mmetric(train_set$y, predicted_cd_w2, metric="CONF")
+mmetric(train_set$y, predicted_cd_w2, metric=c("ACC","TPR","PRECISION","F1"))
+```
+
+# Cross-validation
+```{r}
+# 4A
+cv_function <- function(df, target, nFolds, seedVal, classification, metrics_list)
+{
+  set.seed(seedVal)
+  folds = createFolds(df[,target],nFolds) 
+  
+  cv_results <- lapply(folds, function(x)
+  { 
+    train <- df[-x,-target]
+    test  <- df[x,-target]
+    
+    train_target <- df[-x,target]
+    test_target <- df[x,target]
+    
+    classification_model <- classification(train,train_target) 
+    
+    pred<- predict(classification_model,test)
+    
+    return(mmetric(test_target,pred,c("ACC","PRECISION","TPR","F1")))
+    
+  })
+  
+  cv_results_m <- as.matrix(as.data.frame(cv_results))
+  
+  cv_mean<- as.matrix(rowMeans(cv_results_m))
+  
+  colnames(cv_mean) <- "Mean"
+  
+  cv_sd <- as.matrix(rowSds(cv_results_m))
+  
+  colnames(cv_sd) <- "Sd"
+  
+  cv_all <- cbind(cv_results_m, cv_mean, cv_sd)
+  
+  kable(cv_all,digits=2)
+}
+
+# 4B 4C 4D
+df <- cd
+target <- 21
+nFolds <- 3
+seedVal <- 500
+assign("classification", naiveBayes)
+metrics_list <- c("ACC","PRECISION","TPR","F1")
+
+cv_function(df, target, nFolds, seedVal, classification, metrics_list)
+
+```
+
+```{r}
+# 5A
+nFolds <- 5
+cv_function(df, target, nFolds, seedVal, classification, metrics_list)
+nFolds <- 10
+cv_function(df, target, nFolds, seedVal, classification, metrics_list)
+
+assign("classification", C5.0)
+cv_function(df, target, nFolds, seedVal, classification, metrics_list)
+nFolds <- 5
+cv_function(df, target, nFolds, seedVal, classification, metrics_list)
+```
+
+# Reflection
+The first model built is decision trees. According to A2, I knew that changing the CF would change the complexity of the model. The simpler the model is, the lower the accuracy in both train and test datasets.
+The second model built is naïve bayes models. The overall accuracy of my model increased from 87.73 to 88.45 from removing one of the predictor (i.e. “nr.employed”). This implies that some predictors are not independent and are correlated to each other. A step like creating a correlation heat map could potentially improve the performance of a naïve bayes model. I do see that naïve bayes model is a fast and efficient model for any kind of analysis.
+Addition to making adjustments the hyperparameters or dataset, cross validation was also practiced avoiding overfitting. A 10-folds for sure gives a more accurate view on the performance, however, I think 3-folds and 5-folds are sufficient for the datasets that have only a few thousands of observations.

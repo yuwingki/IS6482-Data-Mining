@@ -1,0 +1,233 @@
+---
+title: "A2_Yu_WingKi"
+author: "WingKi Yu"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    number_sections: yes
+    toc: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Set Up
+
+```{r }
+# 1
+library(C50)
+library(caret)
+library(rminer)
+library(rmarkdown)
+library(tidyverse) 
+
+cloud_wd <- getwd()
+setwd(cloud_wd)
+
+cd = read.csv("CD_additional_balanced.csv", stringsAsFactors = FALSE)
+
+str(cd)
+
+# Categorical to Factor
+cd$job <- factor(cd$job)
+cd$marital <- factor(cd$marital)
+cd$education <- factor(cd$education)
+cd$default <- factor(cd$default)
+cd$housing <- factor(cd$housing)
+cd$loan <- factor(cd$loan)
+cd$contact <- factor(cd$contact)
+cd$month <- factor(cd$month)
+cd$day_of_week <- factor(cd$day_of_week)
+cd$poutcome <- factor(cd$poutcome)
+cd$y <- factor(cd$y)
+
+str(cd)
+summary(cd)
+```
+
+# Target Variable
+
+```{r}
+# 2
+table(cd$y)
+prop.table(table(cd$y))
+
+```
+
+# Data Preparation
+
+```{r}
+# 3A
+set.seed(100)
+
+inTrain <- createDataPartition(cd$y, p=.7,list = FALSE)
+
+train_set <- cd[inTrain,]
+test_set <- cd[-inTrain,]
+
+# 3B
+table(train_set$y)
+prop.table(table(train_set$y))
+table(test_set$y)
+prop.table(table(test_set$y))
+
+```
+# Decision Tree
+## Training
+
+```{r}
+# 4
+train_model1 <- C5.0(formula = y ~., control = C5.0Control(noGlobalPruning=FALSE, CF=.95, earlyStopping = FALSE), data = train_set)
+train_model1
+
+train_model2 <- C5.0(formula = y ~., control = C5.0Control(noGlobalPruning=FALSE, CF=.35, earlyStopping = FALSE), data = train_set)
+train_model2
+
+train_model3 <- C5.0(formula = y ~., control = C5.0Control(noGlobalPruning=FALSE, CF=.1, earlyStopping = FALSE), data = train_set)
+train_model3
+
+train_model4 <- C5.0(formula = y ~., control = C5.0Control(noGlobalPruning=FALSE, CF=.06, earlyStopping = FALSE), data = train_set)
+train_model4
+
+train_model5 <- C5.0(formula = y ~., control = C5.0Control(noGlobalPruning=FALSE, CF=.03, earlyStopping = FALSE), data = train_set)
+train_model5
+
+train_model6 <- C5.0(formula = y ~., control = C5.0Control(noGlobalPruning=FALSE, CF=.02, earlyStopping = FALSE), data = train_set)
+train_model6
+
+train_model7 <- C5.0(formula = y ~., control = C5.0Control(noGlobalPruning=FALSE, CF=.0, earlyStopping = FALSE), data = train_set) # 12 leaf
+train_model7
+```
+
+## Model Information
+```{r fig.height=8, fig.width=20}
+# 5A
+train_model1$size
+train_model2$size
+train_model3$size
+train_model4$size
+train_model5$size
+train_model6$size
+train_model7$size
+
+# 5B
+leaf_nodes_vector <- c(train_model1$size, 
+                       train_model2$size, 
+                       train_model3$size, 
+                       train_model4$size, 
+                       train_model5$size, 
+                       train_model6$size, 
+                       train_model7$size)
+
+cf_vector <- c(.95,.35,.1,.06,.03,.02,.0)
+
+cf_size_df <- data.frame(CF = cf_vector,
+           tree_size = leaf_nodes_vector
+           )
+
+cf_size_df
+
+# so my tree starts off with 336 leaf nodes when CF = .95, then has only 5 leaf nodes when CF = 0. The lower the CF the less complex the tree. 
+
+# 5C
+plot(train_model7)
+
+# 5D
+# For the situation nr.employed = 6000 and duration = 500, the prediction is that the majority of clients have subscribed a certified term deposit (CD). Since nr.employed is 6000, which is greater than 5076.2, we follow the tree to leaf 3 (duration). Then, with duration of 500 that is greater than 446, we can predict that there are more clients subscribing a CD by checking out leaf node 9.
+```
+
+
+## Prediction
+```{r}
+# 6
+train1_prediction <- predict(train_model1, train_set)
+train2_prediction <- predict(train_model2, train_set)
+train3_prediction <- predict(train_model3, train_set)
+train4_prediction <- predict(train_model4, train_set)
+train5_prediction <- predict(train_model5, train_set)
+train6_prediction <- predict(train_model6, train_set)
+train7_prediction <- predict(train_model7, train_set)
+
+test1_prediction <- predict(train_model1, test_set)
+test2_prediction <- predict(train_model2, test_set)
+test3_prediction <- predict(train_model3, test_set)
+test4_prediction <- predict(train_model4, test_set)
+test5_prediction <- predict(train_model5, test_set)
+test6_prediction <- predict(train_model6, test_set)
+test7_prediction <- predict(train_model7, test_set)
+
+```
+
+## Confusion Matrix
+```{r}
+# 7
+mmetric(train_set$y, train1_prediction, metric="CONF")
+mmetric(train_set$y, train2_prediction, metric="CONF")
+mmetric(train_set$y, train3_prediction, metric="CONF")
+mmetric(train_set$y, train4_prediction, metric="CONF")
+mmetric(train_set$y, train5_prediction, metric="CONF")
+mmetric(train_set$y, train6_prediction, metric="CONF")
+mmetric(train_set$y, train7_prediction, metric="CONF")
+
+mmetric(test_set$y, test1_prediction, metric="CONF")
+mmetric(test_set$y, test2_prediction, metric="CONF")
+mmetric(test_set$y, test3_prediction, metric="CONF")
+mmetric(test_set$y, test4_prediction, metric="CONF")
+mmetric(test_set$y, test5_prediction, metric="CONF")
+mmetric(test_set$y, test6_prediction, metric="CONF")
+mmetric(test_set$y, test7_prediction, metric="CONF")
+
+```
+
+## Evaluation Metrics
+```{r}
+# 8
+evaluation_metrics_vector <- c("ACC","F1","PRECISION","TPR")
+
+mmetric(train_set$y, train1_prediction, metric=evaluation_metrics_vector)
+mmetric(train_set$y, train2_prediction, metric=evaluation_metrics_vector)
+mmetric(train_set$y, train3_prediction, metric=evaluation_metrics_vector)
+mmetric(train_set$y, train4_prediction, metric=evaluation_metrics_vector)
+mmetric(train_set$y, train5_prediction, metric=evaluation_metrics_vector)
+mmetric(train_set$y, train6_prediction, metric=evaluation_metrics_vector)
+mmetric(train_set$y, train7_prediction, metric=evaluation_metrics_vector)
+
+mmetric(test_set$y, test1_prediction, metric=evaluation_metrics_vector)
+mmetric(test_set$y, test2_prediction, metric=evaluation_metrics_vector)
+mmetric(test_set$y, test3_prediction, metric=evaluation_metrics_vector)
+mmetric(test_set$y, test4_prediction, metric=evaluation_metrics_vector)
+mmetric(test_set$y, test5_prediction, metric=evaluation_metrics_vector)
+mmetric(test_set$y, test6_prediction, metric=evaluation_metrics_vector)
+mmetric(test_set$y, test7_prediction, metric=evaluation_metrics_vector)
+
+
+```
+
+
+## Model Feature
+```{r}
+# 9A
+C5imp(train_model1)
+C5imp(train_model2)
+C5imp(train_model3)
+C5imp(train_model4)
+C5imp(train_model5)
+C5imp(train_model6)
+C5imp(train_model7)
+
+# 9B
+# The top 4 features in the majority of the models are: duration, nr.employed, month and poutcome
+
+# 9C
+# The 2 least important features are: previous and housing
+
+```
+
+
+
+# Reflections
+1.	Decreasing the CF hyperparameter leads to less complex tree, vice versa.
+2.	Among model 1 and model 7 in train set, model 1 had the best performance. It was the most complex tree out of all. Model 1 had accuracy, F-measure, precision rate and recall rate all above 90, the highest out of all models.
+3.	It is much harder to determine the best performance tree in test set. Model 4 seemed to have the best performance among all. It had the tree size of 18. Since it had the highest accuracy, weighted F-measure and weighted recall rate out of all of the models, it’s considered the best performance model.
+4.	The relationship between complexity and performance seemed to follow an inverted U-shape. As the complexity increased, test set performance might improve due to the model's ability to capture underlying patterns. But after a certain point, the model’s performance may start to degrade due to overfitting. Therefore, it’s important to find the right complexity to avoid underfitting and overfitting.
+5.	I would choose model 4. It had a tree size of 18, making it easier to be interpreted, while it had a decent performance in both train set and test set. Additionally, it was derived from a reasonable confidence level – 0.06. It would align better to the audience’s needs and overall project goals better than the other models.
+

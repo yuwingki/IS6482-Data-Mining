@@ -1,0 +1,228 @@
+---
+title: "A5_Yu_WingKi"
+author: "WingKi Yu"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    number_sections: yes
+    toc: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Package load, data import, inspection, and partitioning
+
+```{r}
+# 1A
+library(caret)
+library(RWeka)
+library(kernlab)
+library(rminer)
+library(matrixStats)
+library(knitr)
+
+# 1Bi
+mydir <- getwd()
+setwd(mydir)
+
+na_sales <- read.csv(file = "NA_sales_filtered.csv", stringsAsFactors = FALSE)
+
+# 1Bii
+na_sales <- na_sales[,-1]
+
+# 1Biii
+na_sales$Platform <- factor(na_sales$Platform)
+na_sales$Genre <- factor(na_sales$Genre)
+na_sales$Rating <- factor(na_sales$Rating)
+
+# 1Biv
+inTrain <- createDataPartition(y=na_sales$NA_Sales, p = 0.70, list=FALSE)
+train_target <- na_sales[inTrain,8]
+test_target <- na_sales[-inTrain,8]
+train_input <- na_sales[inTrain,-8]
+test_input <- na_sales[-inTrain,-8]
+```
+
+# Build and evaluate neural network models for numeric prediction tasks
+```{r}
+# 2Ai
+MLP <- make_Weka_classifier("weka/classifiers/functions/MultilayerPerceptron")
+
+l <- 0.3
+m <- 0.2
+n <-500
+h <- 'a'
+
+model_a <- MLP(train_target ~ .,data = train_input,control = Weka_control(L=l,M=m, N=n,H=h))  
+summary(model_a)
+
+predictions_a_train <- predict(model_a, train_input)
+predictions_a_test <- predict(model_a, test_input)
+
+metrics_list <- c("MAE","RMSE","MAPE","RMSPE","RAE","RRSE","R2")
+
+mmetric(train_target,predictions_a_train,metrics_list)
+mmetric(test_target,predictions_a_test,metrics_list)
+
+# 2Aii
+model_11_11 <- MLP(train_target ~ .,data = train_input,control = Weka_control(L=0.1,M=m, N=n,H='11,11'))
+summary(model_11_11)
+
+predictions_11_11_train <- predict(model_11_11, train_input)
+predictions_11_11_test <- predict(model_11_11, test_input)
+
+mmetric(train_target,predictions_11_11_train,metrics_list)
+mmetric(test_target,predictions_11_11_test,metrics_list)
+
+```
+
+# Build and evaluate SVM (ksvm) models for numeric prediction tasks
+```{r}
+# 3Ai
+set.seed(500)
+model_rbf1 <- ksvm(train_target ~ ., data = train_input, kernel="rbfdot", C=1)
+model_rbf1
+
+predictions_rbf1_train <- predict(model_rbf1, train_input)
+predictions_rbf1_test <- predict(model_rbf1, test_input)
+
+mmetric(train_target,predictions_rbf1_train,metrics_list)
+mmetric(test_target,predictions_rbf1_test,metrics_list)
+
+# 3Aii
+set.seed(500)
+model_poly1 <- ksvm(train_target ~ ., data = train_input, kernel="polydot", C=1)
+model_poly1
+
+predictions_poly1_train <- predict(model_poly1, train_input)
+predictions_poly1_test <- predict(model_poly1, test_input)
+
+mmetric(train_target,predictions_poly1_train,metrics_list)
+mmetric(test_target,predictions_poly1_test,metrics_list)
+
+# 3Aiii
+set.seed(500)
+model_rbf20 <- ksvm(train_target ~ .,data = train_input, kernel="rbfdot", C=20)
+model_rbf20
+
+predictions_rbf20_train <- predict(model_rbf20, train_input)
+predictions_rbf20_test <- predict(model_rbf20, test_input)
+
+mmetric(train_target,predictions_rbf20_train,metrics_list)
+mmetric(test_target,predictions_rbf20_test,metrics_list)
+
+```
+
+# Build and evaluate knn (IBk) models for numeric prediction tasks
+```{r}
+# 4Ai
+model_ibk <- IBk(train_target ~ .,data = train_input)
+summary(model_ibk)
+
+predictions_ibk_train <- predict(model_ibk, train_input)
+predictions_ibk_test <- predict(model_ibk, test_input)
+
+mmetric(train_target,predictions_ibk_train,metrics_list)
+mmetric(test_target,predictions_ibk_test,metrics_list)
+
+# 4Aii
+model_k20 <- IBk(train_target ~ .,data = train_input, control = Weka_control(K = 20))
+summary(model_k20)
+
+predictions_k20_train <- predict(model_k20, train_input)
+predictions_k20_test <- predict(model_k20, test_input)
+
+mmetric(train_target,predictions_k20_train,metrics_list)
+mmetric(test_target,predictions_k20_test,metrics_list)
+
+# 4Aiii
+model_i <- IBk(train_target ~ .,data = train_input, control = Weka_control(I = TRUE))
+summary(model_i)
+
+predictions_i_train <- predict(model_i, train_input)
+predictions_i_test <- predict(model_i, test_input)
+
+mmetric(train_target,predictions_i_train,metrics_list)
+mmetric(test_target,predictions_i_test,metrics_list)
+
+# 4Aiv
+model_x <- IBk(train_target ~ .,data = train_input, control = Weka_control(X = TRUE))
+summary(model_x)
+
+predictions_x_train <- predict(model_x, train_input)
+predictions_x_test <- predict(model_x, test_input)
+
+mmetric(train_target,predictions_x_train,metrics_list)
+mmetric(test_target,predictions_x_test,metrics_list)
+
+```
+
+# Cross-validation function for numeric prediction models
+```{r}
+# 5A
+df <- na_sales
+target <- 8
+seedVal <- 500
+metrics_list <- c("MAE","RMSE","MAPE","RMSPE","RAE","RRSE","R2")
+
+cv_function <- function(df, target, nFolds, seedVal, prediction_method, metrics_list)
+{
+# create folds using the assigned values
+
+set.seed(seedVal)
+folds = createFolds(df[,target],nFolds)
+
+# The lapply loop
+
+cv_results <- lapply(folds, function(x)
+{ 
+# data preparation:
+
+  test_target <- df[x,target]
+  test_input <- df[x,-target]
+  
+  train_target <- df[-x,target]
+  train_input <- df[-x,-target]
+  
+  pred_model <- prediction_method(train_target ~ .,data = train_input)  
+  pred <- predict(pred_model, test_input)
+  return(mmetric(test_target,pred,metrics_list))
+})
+
+cv_results_m <- as.matrix(as.data.frame(cv_results))
+cv_mean<- as.matrix(rowMeans(cv_results_m))
+cv_sd <- as.matrix(rowSds(cv_results_m))
+colnames(cv_mean) <- "Mean"
+colnames(cv_sd) <- "Sd"
+cv_all <- cbind(cv_results_m, cv_mean, cv_sd)
+kable(t(cbind(cv_mean,cv_sd)),digits=2)
+}
+
+```
+
+# 3 fold cross-validation of MLP, ksvm and IBk models
+```{r}
+# 6A
+assign("prediction_method", MLP)
+cv_function(df, target, 3, seedVal, prediction_method, metrics_list)
+
+seedVal <- 500
+assign("prediction_method", ksvm)
+cv_function(df, target, 3, seedVal, prediction_method, metrics_list)
+
+assign("prediction_method", IBk)
+cv_function(df, target, 3, seedVal, prediction_method, metrics_list)
+```
+
+# Reflection
+All of the models help capture complex relationships within the data. By decreasing the learning rate in a two hidden layer mlp model, all of the percentage and relative error measures decreased, indicating the model had improved.
+
+In the ksvm models, changing the kernel choice from default to polynomial resulted in worse performance. All of the error measures shoot up. In contrast, rising the C values in the ksvm models led to a better performance. Higher values of C result in a smaller margin and more accurate classification, but may lead to overfitting. 
+
+The ibk model (k-Nearest Neighbors) exhibits more consistent results compared to the other models, with a correlation coefficient of 0.5404. Moreover, The MAE, RMSE, MAPE, and RMSPE values are relatively stable across different configurations. Surprisingly, changing the valid options to I or X, did not change the performance of the model, compared to the default setting. This indicates that the model is not benefiting from the change of these parameters when the relevant features are already included, or the dataset is fairly balanced.
+
+Comparing the 3 models (mlp, ksvm and ibk) together, we can see that the ksvm model has lower error measures and a higher R2 in this dataset. When encountering a different dataset, the other two models could outperform the ksvm model. This emphasizes the importance of test and trial. 

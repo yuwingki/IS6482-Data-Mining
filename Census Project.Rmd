@@ -1,0 +1,635 @@
+---
+title: "A7_Yu_WingKi"
+author: "WingKi Yu"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    number_sections: yes
+    toc: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Set Up
+```{r}
+# import libraries
+library(C50)
+library(psych)
+library(RWeka)
+library(caret)
+library(rminer)
+library(matrixStats)
+library(knitr)
+library(arules)
+library(tidyverse)
+library(kernlab)
+library(matrixStats)
+library(scatterplot3d)
+library(rmarkdown)
+library(e1071)
+library(tidyverse)
+library(ggplot2)
+library(rpart)
+
+# set up directory
+mydir <- getwd()
+setwd(mydir)
+
+# import dataset
+census <- read.csv(file = "census.csv", stringsAsFactors = FALSE)
+
+# understand the structure
+str(census)
+summary(census)
+```
+
+# Exploratory Data Analysis EDA
+```{r}
+# factorization
+census$workclass <- factor(census$workclass)
+census$education <- factor(census$education)
+census$marital.status <- factor(census$marital.status)
+census$occupation <- factor(census$occupation)
+census$relationship <- factor(census$relationship) 
+census$race <- factor(census$race)
+census$sex <- factor(census$sex)
+census$native.country <- factor(census$native.country)
+census$y <- factor(census$y) 
+
+str(census)
+summary(census)
+census %>% pairs.panels() # correlation < 0.6
+
+# drop null values
+census %>% summarize(across(everything(), ~ sum(is.na(.)))) # no null
+
+# drop empty strings
+census %>%
+  summarize(across(everything(), ~ sum(. == ""))) %>% 
+  t() %>%
+  as.data.frame() %>%
+  filter(V1>0) # no empty strings
+
+```
+
+## Exploring numerical variables
+```{r}
+# age
+census %>% ggplot() +
+  geom_histogram(aes(x=age),binwidth = 20) +
+  ggtitle('Distribution of age')
+
+var(census$age)
+sd(census$age)
+
+# fnlwgt - population weight
+census %>% ggplot() +
+  geom_histogram(aes(x=fnlwgt),binwidth = 20) +
+  ggtitle('Distribution of fnlwgt') 
+
+var(census$fnlwgt)
+sd(census$fnlwgt)
+
+# education.num
+census %>% ggplot() +
+  geom_histogram(aes(x=education.num),binwidth = 20) +
+  ggtitle('Distribution of education.num') 
+
+var(census$education.num)
+sd(census$education.num)
+
+# capital.gain
+census %>% ggplot() +
+  geom_histogram(aes(x=capital.gain),binwidth = 20) +
+  ggtitle('Distribution of capital.gain') 
+
+var(census$capital.gain)
+sd(census$capital.gain)
+
+# capital.loss
+census %>% ggplot() +
+  geom_histogram(aes(x=capital.loss),binwidth = 20) +
+  ggtitle('Distribution of capital.loss') 
+
+var(census$capital.loss)
+sd(census$capital.loss)
+
+# hours.per.week
+census %>% ggplot() +
+  geom_histogram(aes(x=hours.per.week),binwidth = 20) +
+  ggtitle('Distribution of hours.per.week') 
+
+var(census$hours.per.week)
+sd(census$hours.per.week)
+
+# relationship
+#census %>% ggplot() +
+#  geom_point(aes(x=education.num,y=age))
+
+```
+
+## Exploring characteristic variables
+```{r}
+# target variable
+census %>% ggplot() +
+  geom_bar(aes(x=y)) +
+  ggtitle("Distribution of y")
+
+# workclass
+census %>% ggplot() +
+  geom_bar(aes(x=workclass)) +
+  ggtitle("Distribution of workclass")
+
+# education
+census %>% ggplot() +
+  geom_bar(aes(x=education)) +
+  ggtitle("Distribution of education")
+
+# marital.status
+census %>% ggplot() +
+  geom_bar(aes(x=marital.status)) +
+  ggtitle("Distribution of marital.status")
+
+# occupation
+census %>% ggplot() +
+  geom_bar(aes(x=occupation)) +
+  ggtitle("Distribution of occupation")
+
+# relationship
+census %>% ggplot() +
+  geom_bar(aes(x=relationship)) +
+  ggtitle("Distribution of relationship")
+
+# race
+census %>% ggplot() +
+  geom_bar(aes(x=race)) +
+  ggtitle("Distribution of race")
+
+# sex
+census %>% ggplot() +
+  geom_bar(aes(x=sex)) +
+  ggtitle("Distribution of sex")
+
+# native.country
+census %>% ggplot() +
+  geom_bar(aes(x=native.country)) +
+  ggtitle("Distribution of native.country")
+
+# relationship between target and variables
+census %>% ggplot() +
+  geom_bar(aes(x=y,fill=workclass),position="dodge") +
+  ggtitle("Barplot of y by workclass")
+
+census %>% ggplot() +
+  geom_bar(aes(x=y,fill=education),position="dodge") +
+  ggtitle("Barplot of y by education")
+
+census %>% ggplot() +
+  geom_bar(aes(x=y,fill=relationship),position="dodge") +
+  ggtitle("Barplot of y by relationship")
+
+census %>% ggplot() +
+  geom_bar(aes(x=y,fill=race),position="dodge") +
+  ggtitle("Barplot of y by race")
+
+census %>% ggplot() +
+  geom_bar(aes(x=y,fill=sex),position="dodge") +
+  ggtitle("Barplot of y by sex")
+
+```
+
+## Exploring numeric variables by factors
+```{r}
+boxplot(age~y, data = census)
+boxplot(capital.gain~y, data = census)
+boxplot(capital.loss~y, data = census)
+boxplot(hours.per.week~y, data = census)
+
+```
+
+# Data Preparation 
+```{r}
+set.seed(100)
+
+inTrain <- createDataPartition(census$y, p = 0.70, list=FALSE)
+
+train_target <- census[inTrain,15]
+test_target <- census[-inTrain,15]
+train_input <- census[inTrain,-15]
+test_input <- census[-inTrain,-15]
+
+summary(train_target)
+summary(test_target)
+summary(train_input)
+summary(test_input)
+```
+
+# Model Building
+## Decision tree
+```{r}
+tree_cf1 <- C5.0(train_target ~., data = train_input) #unable to plot: Error in partysplit(varid = as.integer(i), index = index, info = k, prob = NULL) : minimum of ‘index’ is not equal to 1 - coming from a categorical variable with a very small number of observations in a given category
+tree_cf2 <- C5.0(train_target ~., control = C5.0Control(noGlobalPruning=FALSE, CF=.9, earlyStopping = FALSE), data = train_input)
+tree_cf3 <- C5.0(train_target ~., control = C5.0Control(noGlobalPruning=FALSE, CF=.7, earlyStopping = FALSE), data = train_input)
+tree_cf4 <- C5.0(train_target ~., control = C5.0Control(noGlobalPruning=FALSE, CF=.5, earlyStopping = FALSE), data = train_input)
+tree_cf5 <- C5.0(train_target ~., control = C5.0Control(noGlobalPruning=FALSE, CF=.3, earlyStopping = FALSE), data = train_input)
+
+tree_cf1$size
+tree_cf2$size
+tree_cf3$size
+tree_cf4$size
+tree_cf5$size
+
+tree1_train_prediction <- predict(tree_cf1, train_input)
+tree1_test_prediction <- predict(tree_cf1, test_input)
+tree2_train_prediction <- predict(tree_cf2, train_input)
+tree2_test_prediction <- predict(tree_cf2, test_input)
+tree3_train_prediction <- predict(tree_cf3, train_input)
+tree3_test_prediction <- predict(tree_cf3, test_input)
+tree4_train_prediction <- predict(tree_cf4, train_input)
+tree4_test_prediction <- predict(tree_cf4, test_input)
+tree5_train_prediction <- predict(tree_cf5, train_input)
+tree5_test_prediction <- predict(tree_cf5, test_input)
+
+mmetric(train_target, tree1_train_prediction, metric="CONF")
+mmetric(test_target, tree1_test_prediction, metric="CONF")
+mmetric(train_target, tree2_train_prediction, metric="CONF")
+mmetric(test_target, tree2_test_prediction, metric="CONF")
+mmetric(train_target, tree3_train_prediction, metric="CONF")
+mmetric(test_target, tree3_test_prediction, metric="CONF")
+mmetric(train_target, tree4_train_prediction, metric="CONF")
+mmetric(test_target, tree4_test_prediction, metric="CONF")
+mmetric(train_target, tree5_train_prediction, metric="CONF")
+mmetric(test_target, tree5_test_prediction, metric="CONF")
+
+mmetric(train_target, tree1_train_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(test_target, tree1_test_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(train_target, tree2_train_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(test_target, tree2_test_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(train_target, tree3_train_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(test_target, tree3_test_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(train_target, tree4_train_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(test_target, tree4_test_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(train_target, tree5_train_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(test_target, tree5_test_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+
+# model feature
+C5imp(tree_cf1)
+C5imp(tree_cf2)
+C5imp(tree_cf3)
+C5imp(tree_cf4)
+C5imp(tree_cf5)
+
+# tree_cf1 best model
+```
+
+### Cross-validation function
+```{r}
+cv_function <- function(df, target, nFolds, seedVal, classification, metrics_list)
+{
+  set.seed(seedVal)
+  folds = createFolds(df[,target],nFolds) 
+  
+  cv_results <- lapply(folds, function(x)
+  { 
+    train <- df[-x,-target]
+    test  <- df[x,-target]
+    
+    train_target <- df[-x,target]
+    test_target <- df[x,target]
+    
+    classification_model <- classification(train,train_target) 
+    
+    pred<- predict(classification_model,test)
+    
+    return(mmetric(test_target,pred,c("ACC","PRECISION","TPR","F1")))
+    
+  })
+  
+  cv_results_m <- as.matrix(as.data.frame(cv_results))
+  
+  cv_mean<- as.matrix(rowMeans(cv_results_m))
+  
+  colnames(cv_mean) <- "Mean"
+  
+  cv_sd <- as.matrix(rowSds(cv_results_m))
+  
+  colnames(cv_sd) <- "Sd"
+  
+  cv_all <- cbind(cv_results_m, cv_mean, cv_sd)
+  
+  kable(cv_all,digits=2)
+}
+
+
+df <- census
+target <- 15
+nFolds <- 5
+seedVal <- 500
+metrics_list <- c("ACC","PRECISION","TPR","F1")
+```
+
+
+```{r}
+assign("classification", C5.0)
+cv_function(df, target, nFolds, seedVal, classification, metrics_list)
+
+```
+
+## Simple Naïve Bayes Model
+```{r}
+nb1 <- naiveBayes(train_target ~ ., data = train_input)
+nb2 <- naiveBayes(train_target ~ . -fnlwgt -race -capital.loss -hours.per.week -native.country, data = train_input) 
+# worse: age, workclass, education, education.num, marital.status, occupation, relationship, sex
+# same: fnlwgt, race, capital.gain, capital.loss, hours.per.week, native.country
+
+nb1_train_prediction <- predict(nb1, train_input)
+nb1_test_prediction <- predict(nb1, test_input)
+nb2_train_prediction <- predict(nb2, train_input)
+nb2_test_prediction <- predict(nb2, test_input)
+
+mmetric(train_target, nb1_train_prediction, metric="CONF")
+mmetric(test_target, nb1_test_prediction, metric="CONF")
+mmetric(train_target, nb2_train_prediction, metric="CONF")
+mmetric(test_target, nb2_test_prediction, metric="CONF")
+
+mmetric(train_target, nb1_train_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(test_target, nb1_test_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(train_target, nb2_train_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+mmetric(test_target, nb2_test_prediction, metric=c("ACC","TPR","PRECISION","F1"))
+
+# nb1 best model
+```
+
+### Cross-validation 
+```{r}
+assign("classification", naiveBayes)
+cv_function(df, target, nFolds, seedVal, classification, metrics_list)
+
+# decision tree better model
+```
+
+## Neural network model
+```{r}
+MLP <- make_Weka_classifier("weka/classifiers/functions/MultilayerPerceptron")
+
+l <- 0.3
+m <- 0.2
+n <- 500
+h <- 'a'
+
+mlp_1 <- MLP(train_target ~ .,data = train_input, control = Weka_control(L=l,M=m, N=n,H=h))  
+summary(mlp_1)
+
+mlp_2 <- MLP(train_target ~ .,data = train_input,control = Weka_control(L=l,M=m, N=n,H='a,a')) 
+summary(mlp_2)
+
+predictions_mlp1_train <- predict(mlp_1, train_input)
+predictions_mlp1_test <- predict(mlp_1, test_input)
+predictions_mlp2_train <- predict(mlp_2, train_input)
+predictions_mlp2_test <- predict(mlp_2, test_input)
+```
+
+
+```{r}
+metrics_list <- c("ACC","PRECISION","TPR","F1")
+
+mmetric(train_target,predictions_mlp1_train,metrics_list)
+mmetric(test_target,predictions_mlp1_test,metrics_list)
+mmetric(train_target,predictions_mlp2_train,metrics_list)
+mmetric(test_target,predictions_mlp2_test,metrics_list)
+
+```
+
+### Cross-validation
+```{r}
+
+cv_function <- function(df, target, nFolds, seedVal, prediction_method, metrics_list)
+{
+# create folds using the assigned values
+
+set.seed(seedVal)
+folds = createFolds(df[,target],nFolds)
+
+# The lapply loop
+
+cv_results <- lapply(folds, function(x)
+{ 
+# data preparation:
+
+  test_target <- df[x,target]
+  test_input <- df[x,-target]
+  
+  train_target <- df[-x,target]
+  train_input <- df[-x,-target]
+  
+  pred_model <- prediction_method(train_target ~ .,data = train_input)  
+  pred <- predict(pred_model, test_input)
+  return(mmetric(test_target,pred,metrics_list))
+})
+
+cv_results_m <- as.matrix(as.data.frame(cv_results))
+cv_mean<- as.matrix(rowMeans(cv_results_m))
+cv_sd <- as.matrix(rowSds(cv_results_m))
+colnames(cv_mean) <- "Mean"
+colnames(cv_sd) <- "Sd"
+cv_all <- cbind(cv_results_m, cv_mean, cv_sd)
+kable(t(cbind(cv_mean,cv_sd)),digits=2)
+}
+
+df <- census
+target <- 15
+seedVal <- 500
+metrics_list <- c("ACC","TPR","PRECISION","F1")
+
+assign("prediction_method", MLP)
+cv_function(df, target, 5, seedVal, prediction_method, metrics_list)
+
+```
+
+
+
+## SVM (ksvm) models
+```{r}
+set.seed(500)
+svm_model <- ksvm(train_target ~ .,data = train_input)
+svm_model
+fitted(svm_model)
+SVindex(svm_model)
+
+set.seed(500)
+model_rbf1 <- ksvm(train_target ~ ., data = train_input, kernel="rbfdot", C=1, cross = 3)
+model_rbf1
+
+set.seed(500)
+model_poly1 <- ksvm(train_target ~ ., data = train_input, kernel="polydot", C=1, cross = 3) # higher error
+model_poly1
+
+set.seed(500)
+model_la1 <- ksvm(train_target ~ .,data = train_input, kernel="laplacedot", C=1, cross = 3)
+model_la1
+
+set.seed(500)
+model_rbf2 <- ksvm(train_target ~ ., data = train_input, kernel="rbfdot", C=5, cross = 3) # higher error
+model_rbf2
+
+set.seed(500)
+model_la2 <- ksvm(train_target ~ .,data = train_input, kernel="laplacedot", C=5, cross = 3) 
+model_la2
+
+set.seed(500)
+model_rbf2 <- ksvm(train_target ~ ., data = train_input, kernel="rbfdot", C=10, cross = 3) # higher error than lower C
+model_rbf2
+
+set.seed(500)
+model_la3 <- ksvm(train_target ~ .,data = train_input, kernel="laplacedot", C=10, cross = 3)
+model_la3
+
+set.seed(500)
+model_la4 <- ksvm(train_target ~ .,data = train_input, kernel="laplacedot", C=20, cross = 3)
+model_la4
+
+set.seed(500)
+model_la4 <- ksvm(train_target ~ .,data = train_input, kernel="laplacedot", C=30, cross = 3)
+model_la4
+
+```
+
+### Cross-validation
+```{r}
+cv_function <- function(df, target, nFolds, seedVal, prediction_method, metrics_list)
+{
+# create folds using the assigned values
+
+set.seed(seedVal)
+folds = createFolds(df[,target],nFolds)
+
+# The lapply loop
+
+cv_results <- lapply(folds, function(x)
+{ 
+# data preparation:
+
+  test_target <- df[x,target]
+  test_input <- df[x,-target]
+  
+  train_target <- df[-x,target]
+  train_input <- df[-x,-target]
+  
+  pred_model <- prediction_method(train_target ~ .,data = train_input)  
+  pred <- predict(pred_model, test_input)
+  return(mmetric(test_target,pred,metrics_list))
+})
+
+cv_results_m <- as.matrix(as.data.frame(cv_results))
+cv_mean<- as.matrix(rowMeans(cv_results_m))
+cv_sd <- as.matrix(rowSds(cv_results_m))
+colnames(cv_mean) <- "Mean"
+colnames(cv_sd) <- "Sd"
+cv_all <- cbind(cv_results_m, cv_mean, cv_sd)
+kable(t(cbind(cv_mean,cv_sd)),digits=2)
+}
+
+df <- census
+target <- 15
+seedVal <- 500
+metrics_list <- c("ACC","TPR","PRECISION","F1")
+
+seedVal <- 500
+assign("prediction_method", ksvm)
+cv_function(df, target, 5, seedVal, prediction_method, metrics_list)
+```
+
+
+## knn (IBk) models
+```{r}
+metrics_list <- c("ACC","TPR","PRECISION","F1")
+
+knn_model1 <- IBk(train_target ~ .,data = train_input,control = Weka_control(K=1))
+knn_model1
+insample_pred1 <- predict(knn_model1, train_input)
+mmetric(train_target, insample_pred1, metrics_list)
+
+knn_model2 <- IBk(train_target ~ .,data = train_input,control = Weka_control(K=5))
+knn_model2
+insample_pred2 <- predict(knn_model2, train_input)
+mmetric(train_target, insample_pred2, metrics_list)
+
+knn_model3 <- IBk(train_target ~ .,data = train_input,control = Weka_control(K=5, F=TRUE))
+knn_model3
+insample_pred3 <- predict(knn_model3, train_input)
+mmetric(train_target, insample_pred3, metrics_list)
+
+knn_model4 <- IBk(train_target ~ .,data = train_input,control = Weka_control(K=5, I=TRUE))
+knn_model4
+insample_pred4 <- predict(knn_model4, train_input)
+mmetric(train_target, insample_pred4, metrics_list)
+```
+
+### cross-validation
+```{r}
+cv_function <- function(df, target, nFolds, seedVal, prediction_method, metrics_list)
+{
+# create folds using the assigned values
+
+set.seed(seedVal)
+folds = createFolds(df[,target],nFolds)
+
+# The lapply loop
+
+cv_results <- lapply(folds, function(x)
+{ 
+# data preparation:
+
+  test_target <- df[x,target]
+  test_input <- df[x,-target]
+  
+  train_target <- df[-x,target]
+  train_input <- df[-x,-target]
+  
+  pred_model <- prediction_method(train_target ~ .,data = train_input)  
+  pred <- predict(pred_model, test_input)
+  return(mmetric(test_target,pred,metrics_list))
+})
+
+cv_results_m <- as.matrix(as.data.frame(cv_results))
+cv_mean<- as.matrix(rowMeans(cv_results_m))
+cv_sd <- as.matrix(rowSds(cv_results_m))
+colnames(cv_mean) <- "Mean"
+colnames(cv_sd) <- "Sd"
+cv_all <- cbind(cv_results_m, cv_mean, cv_sd)
+kable(t(cbind(cv_mean,cv_sd)),digits=2)
+}
+
+df <- census
+target <- 15
+seedVal <- 500
+metrics_list <- c("ACC","TPR","PRECISION","F1")
+
+assign("prediction_method", IBk)
+cv_function(df, target, 5, seedVal, prediction_method, metrics_list)
+```
+
+
+# Reflection
+
+The models used in this project are decision tree, simple naïve bayes models, neural network models (mlp), svm models, and knn models.
+
+Among the 5 different models, the decision tree performed the best with the highest accuracy of 86.82, highest f-score of 91.54 and 70.23 in predicting low income and high income respectively. The second best model is the svm model. The accuracy of the svm model was only slightly lower than that of decision tree at 85.64, while it has a similar f-score of 90.88 and 66.27. The mlp model had a similar performance with the svm model. The accuracy and f-score for low income and high income were 82.43, 89.01 and 53.83, respectively. The naïve bayes model provided a baseline of performance. It had an accuracy of 82.82 and f-score of 89.19 and 58.26. Whereas, the knn model performed the worst with the lowest accuracy of 79.3, and f-score of 86.42 and 56.47. 
+
+Interestingly, all of the models had a higher f-score in low income group than in high income group. This indicates that they all predict the low income group better than the high income group.
+
+Capital.gain is the root node in the five decision trees generated, in other words, it is the most useful feature to predict y. Therefore, I would choose capital.gain as the one feature to predict the target.
+
+A random classifier would have an overall accuracy of 0.5, while the overall accuracy of a majority rule classifier is estimated to be 0.77 in the dataset. Knn model has an overall accuracy of 99.997 which is double that of a random classifier and almost 0.25 more than a majority rule classifier.
+
+Mistakes in predictions could lead to inappropriate marketing efforts. For example, promoting financial products that target higher income groups to lower income groups, vice versa. Such marketing campaigns would have a low return in investment since the campaigns are targeted to groups with lower interest in the financial products.
+
+First, the low income individuals would face financial hardship by accumulating debt and late fees, and potentially damaging their credit scores, which could lead to other socio-economic challenges when this has a significant impact on the individuals’ lives. Second, the negative experiences can harm the reputation of the financial institutions, resulting in a loss of credibility and customer trust. 
+
+There will be missed business opportunities by not offering suitable and more profitable products to customers who can afford them. Besides, the high income individuals may be dissatisfied with the products offered and may turn to competitors that cater to their financial needs better.
+
+The model was better at predicting those with low income. The decision tree has a f-score of 91.54 when predicting the low income individuals, while the model only has a f-score of 70.23 when predicting the high income individuals. The same observation is seen in the precision and recall rate.

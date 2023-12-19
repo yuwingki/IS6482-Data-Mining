@@ -1,0 +1,360 @@
+---
+title: "A4_Yu_WingKi"
+author: "WingKi Yu"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    number_sections: yes
+    toc: yes
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Set up, data import, data exploration, data partitioning, and inspection code
+```{r}
+# 1A
+library(rmarkdown)
+library(psych)
+library(rpart)
+library(RWeka)
+library(caret)
+library(rminer)
+library(matrixStats)
+library(knitr)
+library(tidyverse)
+library(ggplot2)
+
+mydir <- getwd()
+setwd(mydir)
+
+na_sales <- read.csv(file = "NA_sales_filtered.csv", stringsAsFactors = FALSE)
+
+str(na_sales)
+summary(na_sales)
+
+na_sales$Platform <- factor(na_sales$Platform)
+na_sales$Genre <- factor(na_sales$Genre)
+na_sales$Rating <- factor(na_sales$Rating)
+
+# 1B
+na_sales %>% select(where(is.numeric)) %>% pairs.panels()
+
+# 1C
+na_sales_sub <- na_sales[,-1]
+
+na_base_model <- lm(NA_Sales ~ ., data = na_sales_sub)
+summary(na_base_model)
+
+# 1D
+inTrain <- createDataPartition(y=na_sales_sub$NA_Sales, p = 0.70, list=FALSE)
+train_target <- na_sales_sub[inTrain,8]
+test_target <- na_sales_sub[-inTrain,8]
+train_input <- na_sales_sub[inTrain,-8]
+test_input <- na_sales_sub[-inTrain,-8]
+
+# 1E
+summary(train_target)
+summary(test_target)
+summary(train_input)
+summary(test_input)
+```
+
+# lm, rpart and M5P model training and testing
+```{r}
+# 2A
+na_base_train_model <- lm(train_target~., data = train_input)
+na_rpart_model <- rpart(train_target ~ ., data = train_input)
+na_m5p_model <- M5P(train_target ~ ., data = train_input)
+
+# 2Bi
+na_base_train_model
+summary(na_base_train_model)
+na_rpart_model
+summary(na_rpart_model)
+na_m5p_model
+summary(na_m5p_model)
+
+# 2Bii
+predictions_base_train <- predict(na_base_train_model, train_input)
+predictions_rpart_train <- predict(na_rpart_model, train_input)
+predictions_m5p_train <- predict(na_m5p_model, train_input)
+predictions_base_test <- predict(na_base_train_model, test_input)
+predictions_rpart_test <- predict(na_rpart_model, test_input)
+predictions_m5p_test <- predict(na_m5p_model, test_input)
+
+metrics_list <- c("R2","MAE","MAPE","RAE","RMSE","RMSPE","RRSE")
+mmetric(train_target,predictions_base_train,metrics_list)
+mmetric(train_target,predictions_rpart_train,metrics_list)
+mmetric(train_target,predictions_m5p_train,metrics_list)
+mmetric(test_target,predictions_base_test,metrics_list)
+mmetric(test_target,predictions_rpart_test,metrics_list)
+mmetric(test_target,predictions_m5p_test,metrics_list)
+```
+
+# Cross-validation of lm, rpart, and M5P NA_Sales prediction models
+```{r}
+# 3A
+cv_function <- function(df, target, nFolds, seedVal, prediction_method, metrics_list)
+{
+  # create folds
+  set.seed(seedVal)
+  folds = createFolds(df[,target],nFolds) 
+  # perform cross validation
+  cv_results <- lapply(folds, function(x)
+  { 
+    test_target <- df[x,target]
+    test_input  <- df[x,-target]
+
+    train_target <- df[-x,target]
+    train_input <- df[-x,-target]
+
+    prediction_model <- prediction_method(train_target~.,train_input) 
+    pred<- predict(prediction_model,test_input)
+    return(mmetric(test_target,pred,metrics_list))
+  })
+  # generate means and sds and show cv results, means and sds using kable
+  cv_results_m <- as.matrix(as.data.frame(cv_results))
+  cv_mean<- as.matrix(rowMeans(cv_results_m))
+  cv_sd <- as.matrix(rowSds(cv_results_m))
+  colnames(cv_mean) <- "Mean"
+  colnames(cv_sd) <- "Sd"
+  cv_all <- cbind(cv_results_m, cv_mean, cv_sd)
+  kable(t(cv_all),digits=2)
+}
+
+# 3B
+df <- na_sales_sub
+target <- 8
+nFolds <- 5
+seedVal <- 500
+metrics_list <- c("R2","MAE","MAPE","RAE","RMSE","RMSPE","RRSE")
+assign("prediction_method", lm)
+cv_function(df, target, 5, seedVal, prediction_method, metrics_list)
+
+assign("prediction_method", rpart)
+cv_function(df, target, 5, seedVal, rpart, metrics_list)
+
+assign("prediction_method", M5P)
+cv_function(df, target, 5, seedVal, M5P, metrics_list)
+```
+
+# Improve the models by adding a quadratic term of Critic_Score
+```{r}
+# 4A
+na_sales_sub$Critic_Score_Squared <- na_sales_sub$Critic_Score^2
+
+set.seed(500)
+inTrain <- createDataPartition(y=na_sales_sub$NA_Sales , p=0.70, list=FALSE)
+train_input <- na_sales_sub[inTrain,c(1,2,3,4,5,6,7,9)]
+test_input <- na_sales_sub[-inTrain,c(1,2,3,4,5,6,7,9)]
+
+# 4B
+na_improved_train_model <- lm(train_target~., data = train_input)
+summary(na_improved_train_model)
+
+# 4C
+df <- na_sales_sub
+target <- 8
+nFolds <- 5
+seedVal <- 500
+metrics_list <- c("R2","MAE","MAPE","RAE","RMSE","RMSPE","RRSE")
+assign("prediction_method", lm)
+cv_function(df, target, 5, seedVal, prediction_method, metrics_list)
+
+assign("prediction_method", rpart)
+cv_function(df, target, 5, seedVal, rpart, metrics_list)
+
+assign("prediction_method", M5P)
+cv_function(df, target, 5, seedVal, M5P, metrics_list)
+```
+
+# Quiz
+```{r}
+ggplot(na_sales_sub, aes(x=Platform)) + 
+  geom_histogram(stat = "count")
+
+na_sales_sub %>% ggplot() +
+  geom_point(aes(x=Platform,y=NA_Sales)) +
+  ggtitle("NA_Sales by Platform")
+
+ggplot(na_sales_sub, aes(x=Genre)) + 
+  geom_histogram(stat = "count")
+
+na_sales_sub %>% ggplot() +
+  geom_point(aes(x=Genre,y=NA_Sales)) +
+  ggtitle("NA_Sales by Genre")
+
+ggplot(na_sales_sub, aes(x=Critic_Count)) + 
+  geom_histogram()
+
+na_sales_sub %>% ggplot() +
+  geom_point(aes(x=Critic_Count,y=NA_Sales)) +
+  ggtitle("NA_Sales by Critic_Count")
+
+ggplot(na_sales_sub, aes(x=User_Score)) + 
+  geom_histogram()
+
+na_sales_sub %>% ggplot() +
+  geom_point(aes(x=User_Score,y=NA_Sales)) +
+  ggtitle("NA_Sales by User_Score")
+
+# Platform
+na_quiz1_lm <- lm(formula = train_target ~ . -Platform, data = train_input)
+summary(na_quiz1_lm)
+na_quiz1_rpart <- rpart(train_target ~ . -Platform, data = train_input)
+summary(na_quiz1_rpart)
+na_quiz1_m5p <- M5P(train_target ~ . , data = train_input[, -1])
+summary(na_quiz1_m5p)
+
+predictions_base_train <- predict(na_quiz1_lm, train_input)
+predictions_rpart_train <- predict(na_quiz1_rpart, train_input)
+predictions_m5p_train <- predict(na_quiz1_m5p, train_input)
+predictions_base_test <- predict(na_quiz1_lm, test_input)
+predictions_rpart_test <- predict(na_quiz1_rpart, test_input)
+predictions_m5p_test <- predict(na_quiz1_m5p, test_input)
+
+mmetric(train_target,predictions_base_train,metrics_list)
+mmetric(train_target,predictions_rpart_train,metrics_list)
+mmetric(train_target,predictions_m5p_train,metrics_list)
+mmetric(test_target,predictions_base_test,metrics_list)
+mmetric(test_target,predictions_rpart_test,metrics_list)
+mmetric(test_target,predictions_m5p_test,metrics_list)
+
+# Genre
+na_quiz2_lm <- lm(formula = train_target ~ . -Genre, data = train_input)
+summary(na_quiz2_lm)
+na_quiz2_rpart <- rpart(train_target ~ . -Genre, data = train_input)
+summary(na_quiz2_rpart)
+na_quiz2_m5p <- M5P(train_target ~ . , data = train_input[, -2])
+summary(na_quiz2_m5p)
+
+predictions_base_train <- predict(na_quiz2_lm, train_input)
+predictions_rpart_train <- predict(na_quiz2_rpart, train_input)
+predictions_m5p_train <- predict(na_quiz2_m5p, train_input)
+predictions_base_test <- predict(na_quiz2_lm, test_input)
+predictions_rpart_test <- predict(na_quiz2_rpart, test_input)
+predictions_m5p_test <- predict(na_quiz2_m5p, test_input)
+
+mmetric(train_target,predictions_base_train,metrics_list)
+mmetric(train_target,predictions_rpart_train,metrics_list)
+mmetric(train_target,predictions_m5p_train,metrics_list)
+mmetric(test_target,predictions_base_test,metrics_list)
+mmetric(test_target,predictions_rpart_test,metrics_list)
+mmetric(test_target,predictions_m5p_test,metrics_list)
+
+# Critic_Count
+na_quiz3_lm <- lm(formula = train_target ~ . -Critic_Count, data = train_input)
+summary(na_quiz3_lm)
+na_quiz3_rpart <- rpart(train_target ~ . -Critic_Count, data = train_input)
+summary(na_quiz3_rpart)
+na_quiz3_m5p <- M5P(train_target ~ . , data = train_input[, -5])
+summary(na_quiz3_m5p)
+
+predictions_base_train <- predict(na_quiz3_lm, train_input)
+predictions_rpart_train <- predict(na_quiz3_rpart, train_input)
+predictions_m5p_train <- predict(na_quiz3_m5p, train_input)
+predictions_base_test <- predict(na_quiz3_lm, test_input)
+predictions_rpart_test <- predict(na_quiz3_rpart, test_input)
+predictions_m5p_test <- predict(na_quiz3_m5p, test_input)
+
+mmetric(train_target,predictions_base_train,metrics_list)
+mmetric(train_target,predictions_rpart_train,metrics_list)
+mmetric(train_target,predictions_m5p_train,metrics_list)
+mmetric(test_target,predictions_base_test,metrics_list)
+mmetric(test_target,predictions_rpart_test,metrics_list)
+mmetric(test_target,predictions_m5p_test,metrics_list)
+
+# User_Score
+na_quiz4_lm <- lm(formula = train_target ~ . -User_Score, data = train_input)
+summary(na_quiz4_lm)
+na_quiz4_rpart <- rpart(train_target ~ . -User_Score, data = train_input)
+summary(na_quiz4_rpart)
+na_quiz4_m5p <- M5P(train_target ~ . , data = train_input[, -6])
+summary(na_quiz4_m5p)
+
+predictions_base_train <- predict(na_quiz4_lm, train_input)
+predictions_rpart_train <- predict(na_quiz4_rpart, train_input)
+predictions_m5p_train <- predict(na_quiz4_m5p, train_input)
+predictions_base_test <- predict(na_quiz4_lm, test_input)
+predictions_rpart_test <- predict(na_quiz4_rpart, test_input)
+predictions_m5p_test <- predict(na_quiz4_m5p, test_input)
+
+mmetric(train_target,predictions_base_train,metrics_list)
+mmetric(train_target,predictions_rpart_train,metrics_list)
+mmetric(train_target,predictions_m5p_train,metrics_list)
+mmetric(test_target,predictions_base_test,metrics_list)
+mmetric(test_target,predictions_rpart_test,metrics_list)
+mmetric(test_target,predictions_m5p_test,metrics_list)
+
+```
+
+
+# Improve the models with the log term of User_Count
+```{r}
+# 5A
+na_log <- na_sales_sub[,-7]
+na_log$log_User_Count <- log(na_sales_sub$User_Count)
+summary(na_log)
+set.seed(500)
+inTrain <- createDataPartition(y=na_log$NA_Sales , p=0.70, list=FALSE)
+train_input <- na_log[inTrain,c(1,2,3,4,5,6,8,9)]
+test_input <- na_log[-inTrain,c(1,2,3,4,5,6,8,9)]
+summary(train_input)
+
+# 5B
+na_log_train_model <- lm(train_target~ . -Critic_Score_Squared, data = train_input)
+summary(na_log_train_model)
+
+# 5C
+na_log_rpart_model <- rpart(train_target ~ . -Critic_Score_Squared, data = train_input)
+summary(na_log_rpart_model)
+na_log_m5p_model <- M5P(train_target ~ ., data = train_input[, -8])
+summary(na_log_m5p_model)
+
+df <- na_log
+target <- 8
+nFolds <- 5
+seedVal <- 500
+metrics_list <- c("R2","MAE","MAPE","RAE","RMSE","RMSPE","RRSE")
+assign("prediction_method", lm)
+cv_function(df, target, 5, seedVal, prediction_method, metrics_list)
+
+assign("prediction_method", rpart)
+cv_function(df, target, 5, seedVal, rpart, metrics_list)
+
+assign("prediction_method", M5P)
+cv_function(df, target, 5, seedVal, M5P, metrics_list)
+```
+
+# Quiz 
+```{r}
+
+ggplot(na_sales_sub, aes(x=Critic_Score)) + 
+  geom_histogram()
+
+ggplot(na_sales_sub, aes(x=Critic_Score_Squared)) + 
+  geom_histogram()
+
+ggplot(na_sales_sub, aes(x=User_Count)) + 
+  geom_histogram()
+
+ggplot(na_log, aes(x=log_User_Count)) + 
+  geom_histogram()
+
+na_sales_sub %>% ggplot() +
+  geom_point(aes(x=User_Count,y=NA_Sales)) +
+  ggtitle("NA_Sales by User_Count")
+
+na_log %>% ggplot() +
+  geom_point(aes(x=log_User_Count,y=NA_Sales)) +
+  ggtitle("NA_Sales by log_User_Count")
+
+```
+
+
+# Relection
+The initial linear model provided a reasonable baseline for prediction so that I could compare the performance metrics of the models to determine their performances. M5P model had the lowest error measures, in other words, the highest accuracy out of all models before feature engineering because it takes into account non-linear relationships and interactions in the data. Two adjustments were then made to capture non-linear relationships: squared critic score and logged user count. The addition of the quadratic term and the log term significantly improved model performance across all three models, especially in linear regression. R-squared of linear regression models increased from 0.27 to 0.98 with the addition of the log term. The models with these added terms explain more variance, have lower prediction errors, and are more consistent. Among the models, M5P with logged user count stands out as the best-performing model, providing highly accurate and consistent predictions. Its MAE was 1.69 varying by 0.16 comparing to linear regression’s 171.41 varying by 3.76.
